@@ -1,10 +1,10 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: dashboard-conf
+  name: indexer-conf
   labels:
   {{- include "wazuh.labels" . | nindent 4 }}
 data:
-  opensearch_dashboards.yml: |-
-    {{ .Values.dashboardConf.opensearchDashboardsYml | nindent 4 }}
+  internal_users.yml: {{ .Values.indexerConf.internalUsersYml | toYaml | indent 1 }}
+  opensearch.yml: {{ .Values.indexerConf.opensearchYml | toYaml | indent 1 }}
 

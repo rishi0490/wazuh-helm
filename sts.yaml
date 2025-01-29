@@ -1,0 +1,223 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "wazuh.fullname" . }}-indexer
+  labels:
+  {{- include "wazuh.labels" . | nindent 4 }}
+spec:
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  podManagementPolicy: OrderedReady
+  replicas: {{ .Values.wazuhIndexer.replicas }}
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: wazuh-indexer
+  serviceName: {{ include "wazuh.fullname" . }}-indexer
+  template:
+    metadata:
+      labels:
+        app: wazuh-indexer
+        app.kubernetes.io/name: wazuh
+        app.kubernetes.io/instance: wazuh
+        app: wazuh-indexer
+      name: wazuh-indexer
+    spec:              
+      containers:
+      - env:
+        - name: OPENSEARCH_JAVA_OPTS
+          value: "-Xms1g -Xmx1g -Dlog4j2.formatMsgNoLookups=true"
+        - name: OPENSEARCH_HOME
+          value: "/usr/share/wazuh-indexer"
+        - name: OPENSEARCH_PATH_CONF
+          value: "/usr/share/wazuh-indexer/config"          
+        - name: CLUSTER_NAME
+          value: {{ quote .Values.wazuhIndexer.env.clusterName }}
+        - name: NETWORK_HOST
+          value: {{ quote .Values.wazuhIndexer.env.networkHost }}
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.name
+        - name: DISCOVERY_SERVICE
+          value: {{ quote .Values.wazuhIndexer.env.discoveryService }}
+        - name: KUBERNETES_NAMESPACE
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.namespace
+        - name: DISABLE_INSTALL_DEMO_CONFIG
+          value: {{ quote .Values.wazuhIndexer.env.disableInstallDemoConfig
+            }}
+        - name: KUBERNETES_CLUSTER_DOMAIN
+          value: {{ quote .Values.kubernetesClusterDomain }}
+        - name: AWS_ACCESS_KEY_ID
+          value: {{ .Values.wazuhIndexer.awsCreds.accessKey }}
+        - name: AWS_SECRET_ACCESS_KEY
+          value: {{ .Values.wazuhIndexer.awsCreds.secretAccessKey }}
+        - name: AWS_REGION
+          value: {{ .Values.wazuhIndexer.s3.region }}
+        - name: AWS_EC2_METADATA_DISABLED
+          value: "true"   
+        image: {{ .Values.wazuhIndexer.image.repository }}:{{ .Values.wazuhIndexer.image.tag
+          | default .Chart.AppVersion }}
+        imagePullPolicy: {{ .Values.wazuhIndexer.imagePullPolicy }}
+        name: wazuh-indexer
+        ports:
+        - containerPort: 9200
+          name: indexer-rest
+          protocol: TCP
+        - containerPort: 9300
+          name: indexer-nodes
+          protocol: TCP
+        resources: {{- toYaml .Values.wazuhIndexer.resources | nindent
+          10 }}
+        securityContext: {{- toYaml .Values.wazuhIndexer.containerSecurityContext
+          | nindent 10 }}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /var/lib/wazuh-indexer
+          name: wazuh-indexer
+        - mountPath: /etc/sysconfig/wazuh-indexer
+          subPath: wazuh-indexer
+          name: wazuh-config       
+        - mountPath: /usr/share/wazuh-indexer/certs/node-key.pem
+          name: indexer-certs
+          readOnly: true
+          subPath: node-key.pem
+        - mountPath: /usr/share/wazuh-indexer/certs/node.pem
+          name: indexer-certs
+          readOnly: true
+          subPath: node.pem
+        - mountPath: /usr/share/wazuh-indexer/certs/root-ca.pem
+          name: indexer-certs
+          readOnly: true
+          subPath: root-ca.pem
+        - mountPath: /usr/share/wazuh-indexer/certs/admin.pem
+          name: indexer-certs
+          readOnly: true
+          subPath: admin.pem
+        - mountPath: /usr/share/wazuh-indexer/certs/admin-key.pem
+          name: indexer-certs
+          readOnly: true
+          subPath: admin-key.pem
+        - mountPath: /usr/share/wazuh-indexer/opensearch.yml
+          name: indexer-conf
+          readOnly: true
+          subPath: opensearch.yml
+        - mountPath: /usr/share/wazuh-indexer/opensearch-security/internal_users.yml
+          name: indexer-conf
+          readOnly: true
+          subPath: internal_users.yml
+     
+        lifecycle:
+          postStart:
+            exec:
+              command:
+                - sh
+                - -c
+                - |
+                  echo "Creating config directory..."
+                  if [ ! -d "/usr/share/wazuh-indexer/config" ]; then
+                    mkdir -p /usr/share/wazuh-indexer/config
+                    echo "Config directory created."
+                  fi
+                  echo "Installing repository-s3 plugin..."
+                  if ! /usr/share/wazuh-indexer/bin/opensearch-plugin list | grep -q 'repository-s3'; then
+                    /usr/share/wazuh-indexer/bin/opensearch-plugin install --batch repository-s3 || {
+                      echo "Failed to install repository-s3 plugin" >&2
+                      exit 1
+                    }
+                    echo "repository-s3 plugin installed successfully."
+                  else
+                    echo "repository-s3 plugin is already installed."
+                  fi
+                  
+                  echo "Updating permissions for S3 plugin files..."
+                  if [ -d "/usr/share/wazuh-indexer/plugins/repository-s3" ]; then
+                    chown -R wazuh-indexer:wazuh-indexer /usr/share/wazuh-indexer/plugins/repository-s3/
+                    chmod 0640 /usr/share/wazuh-indexer/plugins/repository-s3/*
+                    chmod 0750 /usr/share/wazuh-indexer/plugins/repository-s3
+                    echo "Permissions for S3 plugin files and directory updated."
+                  else
+                    echo "S3 plugin directory not found. Skipping permission update."
+                  fi            
+                  echo "Configuring S3 credentials in keystore..."
+                  if [ ! -f "/usr/share/wazuh-indexer/config/opensearch.keystore" ]; then
+                    /usr/share/wazuh-indexer/bin/opensearch-keystore create
+                  fi
+                  echo "{{ .Values.wazuhIndexer.awsCreds.accessKey }}" | /usr/share/wazuh-indexer/bin/opensearch-keystore add --stdin s3.client.default.access_key
+                  echo "{{ .Values.wazuhIndexer.awsCreds.secretAccessKey }}" | /usr/share/wazuh-indexer/bin/opensearch-keystore add --stdin s3.client.default.secret_key
+      dnsPolicy: ClusterFirst
+      nodeSelector: {{- toYaml .Values.indexer.nodeSelector | nindent 8
+        }}      
+      initContainers:
+      - command:
+        - sh
+        - -c
+        - chown -R 1000:1000 /var/lib/wazuh-indexer
+        env:
+        - name: KUBERNETES_CLUSTER_DOMAIN
+          value: {{ quote .Values.kubernetesClusterDomain }}
+        image: {{ .Values.wazuhIndexer.volumeMountHack.image.repository }}:{{ .Values.wazuhIndexer.volumeMountHack.image.tag
+          | default .Chart.AppVersion }}
+        imagePullPolicy: {{ .Values.wazuhIndexer.volumeMountHack.imagePullPolicy }}
+        name: volume-mount-hack
+        resources: {{- toYaml .Values.wazuhIndexer.volumeMountHack.resources | nindent
+          10 }}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /var/lib/wazuh-indexer
+          name: wazuh-indexer
+      - command:
+        - sysctl
+        - -w
+        - vm.max_map_count=262144
+        env:
+        - name: KUBERNETES_CLUSTER_DOMAIN
+          value: {{ quote .Values.kubernetesClusterDomain }}
+        image: {{ .Values.wazuhIndexer.increaseTheVmMaxMapCount.image.repository }}:{{
+          .Values.wazuhIndexer.increaseTheVmMaxMapCount.image.tag | default .Chart.AppVersion
+          }}
+        imagePullPolicy: {{ .Values.wazuhIndexer.increaseTheVmMaxMapCount.imagePullPolicy
+          }}
+        name: increase-the-vm-max-map-count
+        resources: {}
+        securityContext: {{- toYaml .Values.wazuhIndexer.increaseTheVmMaxMapCount.containerSecurityContext
+          | nindent 10 }}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+     
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      volumes:
+      - name: wazuh-indexer
+        emptyDir: {}
+      - name: wazuh-config
+        emptyDir: {}    
+      - name: indexer-certs
+        secret:
+          secretName: indexer-certs
+      - name: indexer-conf
+        configMap:
+          name: indexer-conf      
+  updateStrategy:
+    rollingUpdate:
+      partition: 0
+    type: RollingUpdate
+  volumeClaimTemplates:
+  - metadata:
+      name: wazuh-indexer
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 10Gi
+      storageClassName: wazuh-storage
+      volumeMode: Filesystem
