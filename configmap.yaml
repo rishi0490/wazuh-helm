@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-conf
+  labels:
+  {{- include "wazuh.labels" . | nindent 4 }}
+data:
+  opensearch_dashboards.yml: |-
+    {{ .Values.dashboardConf.opensearchDashboardsYml | nindent 4 }}
+

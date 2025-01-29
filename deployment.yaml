@@ -1,0 +1,116 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "wazuh.fullname" . }}-dashboard
+  labels:
+  {{- include "wazuh.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.wazuhDashboard.replicas }}
+  strategy:
+    rollingUpdate:
+      maxSurge: {{ .Values.wazuhDashboard.strategy.rollingUpdate.maxSurge | quote }}
+      maxUnavailable: {{ .Values.wazuhDashboard.strategy.rollingUpdate.maxUnavailable
+        | quote }}
+    type: {{ .Values.wazuhDashboard.strategy.type | quote }}
+  selector:
+    matchLabels:
+      app: wazuh-dashboard
+    {{- include "wazuh.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app: wazuh-dashboard
+      {{- include "wazuh.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+      - env:
+        - name: INDEXER_URL
+          value: "https://indexer:9200"
+        - name: INDEXER_USERNAME
+          valueFrom:
+            secretKeyRef:
+              key: username
+              name: indexer-cred
+        - name: INDEXER_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: password
+              name: indexer-cred
+        - name: DASHBOARD_USERNAME
+          valueFrom:
+            secretKeyRef:
+              key: username
+              name: dashboard-cred
+        - name: DASHBOARD_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: password
+              name: dashboard-cred
+        - name: SERVER_SSL_ENABLED
+          value: "true"
+        - name: SERVER_SSL_CERTIFICATE
+          value: "/usr/share/wazuh-dashboard/certs/cert.pem"
+        - name: SERVER_SSL_KEY
+          value: "/usr/share/wazuh-dashboard/certs/key.pem"
+        - name: WAZUH_API_URL
+          value: "https://wazuh-manager-master-0.wazuh-cluster"
+        - name: API_USERNAME
+          valueFrom:
+            secretKeyRef:
+              key: username
+              name: {{ include "wazuh.fullname" . }}-api-cred
+        - name: API_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: password
+              name: {{ include "wazuh.fullname" . }}-api-cred
+        - name: KUBERNETES_CLUSTER_DOMAIN
+          value: {{ quote .Values.kubernetesClusterDomain }}
+
+
+
+
+        image: {{ .Values.wazuhDashboard.image.repository }}:{{ .Values.wazuhDashboard.image.tag
+          | default .Chart.AppVersion }}
+        imagePullPolicy: {{ .Values.wazuhDashboard.imagePullPolicy }}
+        name: wazuh-dashboard
+        ports:
+        - containerPort: 5601
+          name: dashboard
+          protocol: TCP
+        resources: {{- toYaml .Values.wazuhDashboard.resources | nindent
+          10 }}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /usr/share/wazuh-dashboard/config/opensearch_dashboards.yml
+          name: config
+          subPath: opensearch_dashboards.yml
+        - mountPath: /usr/share/wazuh-dashboard/certs/cert.pem
+          name: dashboard-certs
+          readOnly: true
+          subPath: cert.pem
+        - mountPath: /usr/share/wazuh-dashboard/certs/key.pem
+          name: dashboard-certs
+          readOnly: true
+          subPath: key.pem
+        - mountPath: /usr/share/wazuh-dashboard/certs/root-ca.pem
+          name: dashboard-certs
+          readOnly: true
+          subPath: root-ca.pem
+      dnsPolicy: ClusterFirst
+      nodeSelector: {{- toYaml .Values.dashboard.nodeSelector | nindent 8
+        }}      
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - configMap:
+          defaultMode: 420
+          name: dashboard-conf
+        name: config
+      - name: dashboard-certs
+        secret:
+          defaultMode: 420
+          secretName: dashboard-certs

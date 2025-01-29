@@ -1,0 +1,25 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    traefik.ingress.kubernetes.io/router.middlewares: {{ .Values.annotations.routerMiddlewares | quote }}
+  name: {{ include "wazuh.fullname" . }}-ingress
+spec:
+  ingressClassName: {{ .Values.spec.ingressClassName | quote }}
+  rules:
+  - host: {{ .Values.spec.rules.host | quote }}
+    http:
+      paths:
+      - backend:
+          service:
+            name: "dashboard"
+            port:
+              number: 80
+        path: "/"
+        pathType: "Prefix"
+  tls:
+  - hosts:
+{{- range .Values.spec.tls.hosts }}
+    - {{ . | quote }}
+{{- end }}
+    secretName: {{ .Values.spec.tls.secretName | quote }}
