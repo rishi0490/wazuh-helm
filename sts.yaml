@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: {{ include "wazuh.fullname" . }}-manager-master
+  name: {{ include "wazuh.fullname" . }}-manager-worker
   labels:
   {{- include "wazuh.labels" . | nindent 4 }}
 spec:
@@ -9,20 +9,21 @@ spec:
     whenDeleted: Retain
     whenScaled: Retain
   podManagementPolicy: Parallel
-  replicas: {{ .Values.wazuhManagerMaster.replicas }}
+  replicas: {{ .Values.wazuhManagerWorker.replicas }}
+  revisionHistoryLimit: 10
   selector:
     matchLabels:
       app: wazuh-manager
-      node-type: master
+      node-type: worker
   serviceName: {{ include "wazuh.fullname" . }}-cluster
   template:
     metadata:
       labels:
         app: wazuh-manager
-        node-type: master
+        node-type: worker
         app.kubernetes.io/instance: wazuh
         app.kubernetes.io/name: wazuh
-      name: wazuh-manager-master
+      name: wazuh-manager-worker
     spec:
       containers:
       - env:
@@ -46,16 +47,6 @@ spec:
           value: "/etc/ssl/filebeat.pem"
         - name: SSL_KEY
           value: "/etc/ssl/filebeat.key"
-        - name: API_USERNAME
-          valueFrom:
-            secretKeyRef:
-              key: username
-              name: {{ include "wazuh.fullname" . }}-api-cred
-        - name: API_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              key: password
-              name: {{ include "wazuh.fullname" . }}-api-cred
         - name: WAZUH_CLUSTER_KEY
           valueFrom:
             secretKeyRef:
@@ -67,24 +58,22 @@ spec:
 
 
 
-        image: {{ .Values.wazuhManagerMaster.wazuhManager.image.repository }}:{{ .Values.wazuhManagerMaster.wazuhManager.image.tag
+
+        image: {{ .Values.wazuhManagerWorker.wazuhManager.image.repository }}:{{ .Values.wazuhManagerWorker.wazuhManager.image.tag
           | default .Chart.AppVersion }}
-        imagePullPolicy: {{ .Values.wazuhManagerMaster.wazuhManager.imagePullPolicy
+        imagePullPolicy: {{ .Values.wazuhManagerWorker.wazuhManager.imagePullPolicy
           }}
         name: wazuh-manager
         ports:
-        - containerPort: 1515
-          name: registration
+        - containerPort: 1514
+          name: agents-events
           protocol: TCP
         - containerPort: 1516
           name: cluster
           protocol: TCP
-        - containerPort: 55000
-          name: api
-          protocol: TCP
-        resources: {{- toYaml .Values.wazuhManagerMaster.wazuhManager.resources | nindent
+        resources: {{- toYaml .Values.wazuhManagerWorker.wazuhManager.resources | nindent
           10 }}
-        securityContext: {{- toYaml .Values.wazuhManagerMaster.wazuhManager.containerSecurityContext
+        securityContext: {{- toYaml .Values.wazuhManagerWorker.wazuhManager.containerSecurityContext
           | nindent 10 }}
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: File
@@ -92,7 +81,7 @@ spec:
         - mountPath: /wazuh-config-mount/etc/ossec.conf
           name: config
           readOnly: true
-          subPath: master.conf
+          subPath: worker.conf
         - mountPath: /etc/ssl/root-ca.pem
           name: filebeat-certs
           readOnly: true
@@ -105,49 +94,45 @@ spec:
           name: filebeat-certs
           readOnly: true
           subPath: filebeat-key.pem
-        - mountPath: /wazuh-config-mount/etc/authd.pass
-          name: wazuh-authd-pass
-          readOnly: true
-          subPath: authd.pass
         - mountPath: /var/ossec/api/configuration
-          name: wazuh-manager-master
+          name: wazuh-manager-worker
           subPath: wazuh/var/ossec/api/configuration
         - mountPath: /var/ossec/etc
-          name: wazuh-manager-master
+          name: wazuh-manager-worker
           subPath: wazuh/var/ossec/etc
         - mountPath: /var/ossec/logs
-          name: wazuh-manager-master
+          name: wazuh-manager-worker
           subPath: wazuh/var/ossec/logs
         - mountPath: /var/ossec/queue
-          name: wazuh-manager-master
+          name: wazuh-manager-worker
           subPath: wazuh/var/ossec/queue
         - mountPath: /var/ossec/var/multigroups
-          name: wazuh-manager-master
+          name: wazuh-manager-worker
           subPath: wazuh/var/ossec/var/multigroups
         - mountPath: /var/ossec/integrations
-          name: wazuh-manager-master
+          name: wazuh-manager-worker
           subPath: wazuh/var/ossec/integrations
         - mountPath: /var/ossec/active-response/bin
-          name: wazuh-manager-master
+          name: wazuh-manager-worker
           subPath: wazuh/var/ossec/active-response/bin
         - mountPath: /var/ossec/agentless
-          name: wazuh-manager-master
+          name: wazuh-manager-worker
           subPath: wazuh/var/ossec/agentless
         - mountPath: /var/ossec/wodles
-          name: wazuh-manager-master
+          name: wazuh-manager-worker
           subPath: wazuh/var/ossec/wodles
         - mountPath: /etc/filebeat
-          name: wazuh-manager-master
+          name: wazuh-manager-worker
           subPath: filebeat/etc/filebeat
         - mountPath: /var/lib/filebeat
-          name: wazuh-manager-master
+          name: wazuh-manager-worker
           subPath: filebeat/var/lib/filebeat
       dnsPolicy: ClusterFirst
-      nodeSelector: {{- toYaml .Values.wazuhManagerMaster.nodeSelector | nindent 8
-        }}
+      nodeSelector: {{- toYaml .Values.wazuhManagerWorker.nodeSelector | nindent 8
+        }}      
       restartPolicy: Always
       schedulerName: default-scheduler
-      securityContext: {{- toYaml .Values.wazuhManagerMaster.podSecurityContext | nindent
+      securityContext: {{- toYaml .Values.wazuhManagerWorker.podSecurityContext | nindent
         8 }}
       terminationGracePeriodSeconds: 30
       volumes:
@@ -159,17 +144,13 @@ spec:
         secret:
           defaultMode: 420
           secretName: indexer-certs
-      - name: wazuh-authd-pass
-        secret:
-          defaultMode: 420
-          secretName: {{ include "wazuh.fullname" . }}-authd-pass
   updateStrategy:
     rollingUpdate:
       partition: 0
     type: RollingUpdate
   volumeClaimTemplates:
   - metadata:
-      name: wazuh-manager-master
+      name: wazuh-manager-worker
     spec:
       accessModes:
       - ReadWriteOnce
