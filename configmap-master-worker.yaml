@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: wazuh-conf
+  labels:
+  {{- include "wazuh.labels" . | nindent 4 }}
+data:
+  master.conf: {{ .Values.wazuhConf.masterConf | toYaml | indent 1 }}
+  worker.conf: {{ .Values.wazuhConf.workerConf | toYaml | indent 1 }}

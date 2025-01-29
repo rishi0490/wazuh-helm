@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "wazuh.fullname" . }}
+  labels:
+    app: wazuh-manager
+  {{- include "wazuh.labels" . | nindent 4 }}
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-backend-protocol: tcp
+    service.beta.kubernetes.io/aws-load-balancer-internal: "true"
+spec:
+  type: {{ .Values.wazuh.type }}
+  selector:
+    app: wazuh-manager
+    node-type: master
+    {{- include "wazuh.selectorLabels" . | nindent 4 }}
+  ports:
+  {{- .Values.wazuh.ports | toYaml | nindent 2 }}
